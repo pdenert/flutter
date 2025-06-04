@@ -1030,3 +1030,98 @@ final class AssetTransformerEntry {
     return 'AssetTransformerEntry(package: $package, args: $args)';
   }
 }
+
+/// Represents an entry under the `dependencies` section of a pubspec, possibly with flavors.
+@immutable
+class FlavorDependencyEntry {
+  const FlavorDependencyEntry({
+    required this.name,
+    this.version,
+    this.flavors = const <String>{},
+    this.options = const <String, Object?>{},
+  });
+
+  final String name;
+  final String? version;
+  final Set<String> flavors;
+  final Map<String, Object?> options;
+
+  static const String _flavorKey = 'flavors';
+  static const String _versionKey = 'version';
+
+  static (FlavorDependencyEntry? entry, String? error) parseFromYamlSafe(String name, Object? yaml) {
+    if (yaml == null) {
+      return (null, 'Dependency $name is null.');
+    }
+    if (yaml is String) {
+      return (FlavorDependencyEntry(name: name, version: yaml), null);
+    }
+    if (yaml is Map) {
+      final Object? version = yaml[_versionKey];
+      final (List<String>? flavors, List<String> flavorsErrors) = _parseFlavorsSection(yaml[_flavorKey]);
+      if (flavorsErrors.isNotEmpty) {
+        return (null, 'Dependency $name: flavors error: ${flavorsErrors.join(", ")}');
+      }
+      final Map<String, Object?> options = Map<String, Object?>.from(yaml);
+      options.remove(_versionKey);
+      options.remove(_flavorKey);
+      return (
+        FlavorDependencyEntry(
+          name: name,
+          version: version is String ? version : null,
+          flavors: Set<String>.from(flavors ?? <String>[]),
+          options: options,
+        ),
+        null,
+      );
+    }
+    return (null, 'Dependency $name had unexpected shape.');
+  }
+
+  static (List<String>? flavors, List<String> errors) _parseFlavorsSection(Object? yaml) {
+    if (yaml == null) {
+      return (null, <String>[]);
+    }
+    return _parseList<String>(yaml, _flavorKey, 'String');
+  }
+}
+
+/// Returns a list of all dependencies, including flavor-specific ones.
+List<FlavorDependencyEntry> getFlavorDependencies(Object? dependenciesSection) {
+  if (dependenciesSection == null) {
+    return <FlavorDependencyEntry>[];
+  }
+  if (dependenciesSection is! YamlMap) {
+    throw Exception('Expected dependencies to be a map, but got \\${dependenciesSection.runtimeType}.');
+  }
+  final List<FlavorDependencyEntry> results = <FlavorDependencyEntry>[];
+  for (final MapEntry entry in dependenciesSection.entries) {
+    final (FlavorDependencyEntry? dep, String? error) = FlavorDependencyEntry.parseFromYamlSafe(entry.key as String, entry.value);
+    if (dep != null) {
+      results.add(dep);
+    } else if (error != null) {
+      throw Exception('Error parsing dependency: $error');
+    }
+  }
+  return results;
+}
+
+/// Returns a dependencies map for pubspec.yaml, filtered by the given flavor.
+Map<String, Object?> getDependenciesForFlavor(Object? dependenciesSection, String? flavor) {
+  final List<FlavorDependencyEntry> allDeps = getFlavorDependencies(dependenciesSection);
+  final Map<String, Object?> result = <String, Object?>{};
+  for (final dep in allDeps) {
+    if (dep.flavors.isEmpty || (flavor != null && dep.flavors.contains(flavor))) {
+      if (dep.version != null && dep.options.isEmpty) {
+        result[dep.name] = dep.version;
+      } else {
+        final Map<String, Object?> entry = Map<String, Object?>.from(dep.options);
+        if (dep.version != null) {
+          entry['version'] = dep.version;
+        }
+        result[dep.name] = entry;
+      }
+    }
+  }
+  return result;
+}

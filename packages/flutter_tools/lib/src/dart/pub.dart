@@ -153,6 +153,7 @@ abstract class Pub {
     bool shouldSkipThirdPartyGenerator = true,
     bool enforceLockfile = false,
     PubOutputMode outputMode = PubOutputMode.all,
+    String? flavor,
   });
 
   /// Runs pub in 'batch' mode.
@@ -245,8 +246,26 @@ class _DefaultPub implements Pub {
     bool shouldSkipThirdPartyGenerator = true,
     bool enforceLockfile = false,
     PubOutputMode outputMode = PubOutputMode.all,
+    String? flavor,
   }) async {
     final String directory = project.directory.path;
+    File? tempPubspec;
+    bool useTempPubspec = false;
+    if (flavor != null && flavor.isNotEmpty) {
+      // Generate a filtered pubspec.yaml for the flavor
+      final manifest = project.manifest;
+      final Map<String, Object?> filteredDeps = getDependenciesForFlavor(
+        manifest._descriptor['dependencies'],
+        flavor,
+      );
+      final Map<String, Object?> pubspecMap = Map<String, Object?>.from(manifest._descriptor);
+      pubspecMap['dependencies'] = filteredDeps;
+      final String yaml = encodeYamlAsString(YamlMap.wrap(pubspecMap));
+      tempPubspec = _fileSystem.file(_fileSystem.path.join(directory, 'pubspec.flavor.yaml'));
+      tempPubspec.writeAsStringSync(yaml);
+      useTempPubspec = true;
+    }
+    final String pubspecPath = useTempPubspec ? 'pubspec.flavor.yaml' : 'pubspec.yaml';
 
     // Here we use pub's private helper file to locate the package_config.
     // In pub workspaces pub will generate a `.dart_tool/pub/workspace_ref.json`
@@ -335,16 +354,42 @@ class _DefaultPub implements Pub {
       '--example',
       if (enforceLockfile) '--enforce-lockfile',
     ];
-    await _runWithStdioInherited(
-      args,
-      command: command,
-      context: context,
-      directory: directory,
-      failureMessage: 'pub $command failed',
-      flutterRootOverride: flutterRootOverride,
-      outputMode: outputMode,
-    );
-    await _updateVersionAndPackageConfig(project);
+    // Temporarily rename pubspec.flavor.yaml to pubspec.yaml for pub get
+    File? backup;
+    if (useTempPubspec) {
+      final File original = _fileSystem.file(_fileSystem.path.join(directory, 'pubspec.yaml'));
+      if (original.existsSync()) {
+        backup = _fileSystem.file(_fileSystem.path.join(directory, 'pubspec.yaml.bak'));
+        original.renameSync(backup.path);
+      }
+      tempPubspec.copySync(_fileSystem.path.join(directory, 'pubspec.yaml'));
+    }
+    try {
+      await _runWithStdioInherited(
+        args,
+        command: command,
+        context: context,
+        directory: directory,
+        failureMessage: 'pub $command failed',
+        flutterRootOverride: flutterRootOverride,
+        outputMode: outputMode,
+      );
+      await _updateVersionAndPackageConfig(project);
+    } finally {
+      // Restore original pubspec.yaml
+      if (useTempPubspec) {
+        final File temp = _fileSystem.file(_fileSystem.path.join(directory, 'pubspec.yaml'));
+        if (temp.existsSync()) {
+          temp.deleteSync();
+        }
+        if (backup != null && backup.existsSync()) {
+          backup.renameSync(_fileSystem.path.join(directory, 'pubspec.yaml'));
+        }
+        if (tempPubspec.existsSync()) {
+          tempPubspec.deleteSync();
+        }
+      }
+    }
   }
 
   /// Runs pub with [arguments] and [ProcessStartMode.inheritStdio] mode.
