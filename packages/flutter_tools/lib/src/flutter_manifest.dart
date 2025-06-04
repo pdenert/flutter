@@ -755,23 +755,27 @@ void _validateFonts(YamlList fonts, List<String> errors) {
           case 'asset':
             if (kvp.value is! String) {
               errors.add(
-                'Expected font asset ${kvp.value} ((${kvp.value.runtimeType})) to be a string.',
+                'Expected font asset \\${kvp.value} ((\\${kvp.value.runtimeType})) to be a string.',
               );
             }
+            break;
           case 'weight':
             if (!fontWeights.contains(kvp.value)) {
               errors.add(
-                'Invalid value ${kvp.value} ((${kvp.value.runtimeType})) for font -> weight.',
+                'Invalid value \\${kvp.value} ((\\${kvp.value.runtimeType})) for font -> weight.',
               );
             }
+            break;
           case 'style':
             if (kvp.value != 'normal' && kvp.value != 'italic') {
               errors.add(
-                'Invalid value ${kvp.value} ((${kvp.value.runtimeType})) for font -> style.',
+                'Invalid value \\${kvp.value} ((\\${kvp.value.runtimeType})) for font -> style.',
               );
             }
+            break;
           default:
-            errors.add('Unexpected key $fontKey ((${kvp.value.runtimeType})) under font.');
+            errors.add('Unexpected key $fontKey ((\\${kvp.value.runtimeType})) under font.');
+            break;
         }
       }
     }
